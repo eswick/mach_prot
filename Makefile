@@ -1,6 +1,6 @@
 CC = clang
 LD = $(CC)
-CFLAGS = 
+CFLAGS =
 LDFLAGS = 
 
 FILES = main.c
