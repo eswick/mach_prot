@@ -34,10 +34,15 @@ THE SOFTWARE. */
 #include <mach-o/fat.h>
 
 void usage(){
-	puts("Usage: mach_prot <filename> <segname> [rwx]");
+	puts("Usage: mach_prot <init/max> <filename> <segname> [rwx]");
 }
 
-void mach_prot_64(struct mach_header_64 *header, char *segname, vm_prot_t maxprot){
+typedef enum {
+  PROT_INIT = 1 << 0,
+  PROT_MAX = 1 << 1
+} PROT_TYPE;
+
+void mach_prot_64(struct mach_header_64 *header, char *segname, vm_prot_t prot, PROT_TYPE prot_type){
 	bool wrote_prot = false;
 
 	/* Loop through load commands */
@@ -50,8 +55,12 @@ void mach_prot_64(struct mach_header_64 *header, char *segname, vm_prot_t maxpro
 
 			if(strcmp(seg_cmd->segname, segname) == 0){
 
-				/* Write new segment maxprot */
-				seg_cmd->maxprot = maxprot;
+				/* Write new segment prots */
+        if (prot_type & PROT_MAX)
+          seg_cmd->maxprot = prot;
+        if (prot_type & PROT_INIT)
+          seg_cmd->initprot = prot;
+        
 				wrote_prot = true;
 			}
 
@@ -67,7 +76,7 @@ void mach_prot_64(struct mach_header_64 *header, char *segname, vm_prot_t maxpro
 	}
 }
 
-void mach_prot(struct mach_header *header, char *segname, vm_prot_t maxprot){
+void mach_prot(struct mach_header *header, char *segname, vm_prot_t prot, PROT_TYPE prot_type){
 	bool wrote_prot = false;
 
 	/* Loop through load commands */
@@ -80,8 +89,12 @@ void mach_prot(struct mach_header *header, char *segname, vm_prot_t maxprot){
 
 			if(strcmp(seg_cmd->segname, segname) == 0){
 
-				/* Write new segment maxprot */
-				seg_cmd->maxprot = maxprot;
+				/* Write new segment prots */
+        if (prot_type & PROT_MAX)
+          seg_cmd->maxprot = prot;
+        if (prot_type & PROT_INIT)
+          seg_cmd->initprot = prot;
+        
 				wrote_prot = true;
 			}
 
@@ -99,21 +112,34 @@ void mach_prot(struct mach_header *header, char *segname, vm_prot_t maxprot){
 
 int main(int argc, char *argv[]){
 
-	if(argc < 4){
+	if(argc < 5){
 		usage();
 		exit(0);
 	}
+  
+  PROT_TYPE prottype = 0;
+  
+  /* Determine prot type */
+  if (strcmp(argv[1], "init") == 0)
+    prottype = PROT_INIT;
+  else if (strcmp(argv[1], "max") == 0)
+    prottype = PROT_MAX;
+  else {
+    fprintf(stderr, "Unrecognized prot type '%s'\n", argv[1]);
+    exit(1);
+  }
+    
 
-	/* Calculate maxprot */
-	vm_prot_t maxprot = 0;
+	/* Calculate prot */
+	vm_prot_t prot = 0;
 
-	char *protstring = argv[3];
+	char *protstring = argv[4];
 	while(*protstring != '\0'){
 
 		switch(*protstring){
-			case 'r': maxprot |= VM_PROT_READ; break;
-			case 'w': maxprot |= VM_PROT_WRITE; break;
-			case 'x': maxprot |= VM_PROT_EXECUTE; break;
+			case 'r': prot |= VM_PROT_READ; break;
+			case 'w': prot |= VM_PROT_WRITE; break;
+			case 'x': prot |= VM_PROT_EXECUTE; break;
 			default: usage(); exit(0);
 		}
 
@@ -122,7 +148,7 @@ int main(int argc, char *argv[]){
 
 	/* Open file */
 	struct stat stat_buf;
-	int fd = open(argv[1], O_RDWR, 0);
+	int fd = open(argv[2], O_RDWR, 0);
 
 	if( fd == -1 )
 		perror("Cannot open file"), exit(1);
@@ -150,15 +176,15 @@ int main(int argc, char *argv[]){
 
 			if(cputype & CPU_ARCH_ABI64)
 				/* Slice is 64 bit */
-				mach_prot_64((struct mach_header_64*)(offset + (uint8_t*)mh), argv[2], maxprot);
+				mach_prot_64((struct mach_header_64*)(offset + (uint8_t*)mh), argv[3], prot, prottype);
 			else
 				/* Slice is 32 bit */
-				mach_prot((struct mach_header*)(offset + (uint8_t*)mh), argv[2], maxprot);
+				mach_prot((struct mach_header*)(offset + (uint8_t*)mh), argv[3], prot, prottype);
 		}
 	}else if( mh->magic == MH_MAGIC_64 ){
-		mach_prot_64((struct mach_header_64*)mh, argv[2], maxprot);
+		mach_prot_64((struct mach_header_64*)mh, argv[3], prot, prottype);
 	}else if( mh->magic == MH_MAGIC ){
-		mach_prot((struct mach_header*)mh, argv[2], maxprot);
+		mach_prot((struct mach_header*)mh, argv[3], prot, prottype);
 	}else{
 		fprintf(stderr, "Invalid file!\n");
 		exit(1);
